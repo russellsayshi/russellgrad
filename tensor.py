@@ -356,6 +356,14 @@ class Tensor:
         out._backward = _sum_backward
         return out
 
+    def log(self):
+        result = np.log(self.data)
+        out = Tensor(result, (self,), 'log')
+        def _log_backwards():
+            self.grad += 1/self.data * out.grad
+        out._backward = _log_backwards
+        return out
+
     def mean(self, axis=None, keepdims=False):
         if axis is not None and not isinstance(axis, int):
             raise ValueError("axis must be None or an int")

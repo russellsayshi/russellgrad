@@ -1,28 +1,13 @@
 from typing import List, Tuple
 from tensor import Tensor
-import math
+from tokenizer import Tokenizer
+from tokenizer_constants import vocabulary_map
+from softmax import softmax
 import numpy as np
 np.random.seed(42)
 
-def softmax(x, axis=-1): # TODO: remember this
-    e_x = (x - x.max(axis=axis, keepdims=True)).exp()
-    return e_x / e_x.sum(axis=axis, keepdims=True)
-
-# NOTE: Have chatgpt give you versions of this with things subtly wrong and you have to guess what's wrong
-
-vocabulary = list("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ 0123456789.,!?")
-vocabulary_map = {}
-for i, c in enumerate(vocabulary):
-    vocabulary_map[c] = i
-n_words = len(vocabulary)
-
 # ---- constants ----
-word_embedding_dim = 16
-max_seq_len = 256
-pad_token_id = n_words
 epsilon = 1e-5
-leaky_relu_alpha = 0.2
-embed_std = 1 / math.sqrt(word_embedding_dim)
 
 class AttentionHead:
     def __init__(self, d_kq: int, d_v: int, hidden_size: int):
@@ -72,7 +57,7 @@ class AttentionLayer:
         if hidden_size % n_heads != 0:
             raise ValueError("n_heads should divide hidden_size")
         self.hidden_size = hidden_size
-        self.per_head_dim = word_embedding_dim // n_heads
+        self.per_head_dim = hidden_size // n_heads
         self.n_heads = n_heads
         self.heads = []
         for _ in range(n_heads):
@@ -151,29 +136,6 @@ def block(hidden: Tensor, attention_layer: AttentionLayer, ff_layer: FFLayer, la
     result = ff_out + x2 # residual connection
     return result
 
-class Tokenizer:
-    def __init__(self, vocab_size: int, max_seq_len: int, word_embedding_dim: int) -> None:
-        # we add 1 to vocab size for pad token
-        embed_std = 1 / math.sqrt(vocab_size)
-        self.word_embedding_dim = word_embedding_dim
-        word_embedding_weights_numpy = np.random.normal(0, embed_std, (vocab_size+1, word_embedding_dim))
-        word_embedding_weights_numpy[-1] = np.zeros(word_embedding_dim)
-        self.word_embedding_weights = Tensor(word_embedding_weights_numpy) # (n_words+1, embedding_dim)
-        self.absolute_positional_encoding = Tensor(np.random.normal(0, embed_std, (max_seq_len, word_embedding_dim))) # (max_seq_len, word_embedding_dim)
-
-    def parameters(self):
-        return [self.word_embedding_weights, self.absolute_positional_encoding]
-
-    def forward(self, input_strings: List[str]) -> Tuple[Tensor, np.ndarray]: # returns encoded words & padding mask
-        max_len = max([len(x) for x in input_strings])
-        token_indices = np.array([[vocabulary_map[c] for c in input_string if c in vocabulary_map] + [pad_token_id] * (max_len - len(input_string)) for input_string in input_strings])
-
-        print(token_indices)
-        word_embeddings = self.word_embedding_weights[token_indices] # (batch, token, word_embedding_dim)
-        positionally_encoded_words = word_embeddings + self.absolute_positional_encoding[0:max_len, :]
-        padding_mask = token_indices == pad_token_id
-        return positionally_encoded_words, padding_mask
-
 class Transformer():
     def __init__(self, tokenizer: Tokenizer, n_layers: int, n_attn_heads: int, ff_scale_factor: int = 4) -> None:
         self.hidden_size = tokenizer.word_embedding_dim
@@ -185,6 +147,7 @@ class Transformer():
 
     def parameters(self):
         params = []
+        params.extend(self.tokenizer.parameters())
         for layer in range(self.n_layers):
             params.extend(self.attn_layers[layer].parameters())
             params.extend(self.ff_layers[layer].parameters())
@@ -193,7 +156,10 @@ class Transformer():
         return params
 
     def forward(self, input_strings: List[str]):
-        positionally_encoded_words, padding_mask = self.tokenizer.forward(input_strings)
+        positionally_encoded_words, _, padding_mask = self.tokenizer.forward(input_strings)
+        return self.forward_tokenized(positionally_encoded_words, padding_mask)
+
+    def forward_tokenized(self, positionally_encoded_words: Tensor, padding_mask: np.ndarray):
         last_layer_output = positionally_encoded_words
         for layer_index in range(self.n_layers):
             last_layer_output = block(last_layer_output, self.attn_layers[layer_index], self.ff_layers[layer_index], self.layer_norms[layer_index], padding_mask)
