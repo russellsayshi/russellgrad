@@ -1,4 +1,4 @@
-from typing import Any, Callable, Tuple, Union
+from typing import Any, Callable, List, Tuple, Union
 import numpy as np
 
 def is_num(x: Any):
@@ -101,20 +101,61 @@ class Tensor:
     #     return out
 
     @classmethod
+    def concatenate(cls, tensors: List["Tensor"], axis=-1) -> "Tensor":
+        if not isinstance(axis, int):
+            raise ValueError("axis must be int")
+        if not tensors:
+            raise ValueError("Cannot concatenate empty list of tensors")
+        
+        # Check that all tensors have the same shape except for the concatenation axis
+        first_shape = list(tensors[0].shape)
+        for i, tensor in enumerate(tensors[1:], 1):
+            tensor_shape = list(tensor.shape)
+            if len(tensor_shape) != len(first_shape):
+                raise ValueError(f"All tensors must have same number of dimensions. Tensor 0 has {len(first_shape)} dims, tensor {i} has {len(tensor_shape)} dims")
+            for dim_idx, (dim1, dim2) in enumerate(zip(first_shape, tensor_shape)):
+                if dim_idx != axis and dim1 != dim2:
+                    raise ValueError(f"All tensors must have same shape except for concatenation axis {axis}. Tensor 0 shape: {tuple(first_shape)}, tensor {i} shape: {tuple(tensor_shape)}")
+
+        result = np.concatenate([t.data for t in tensors], axis=axis)
+        axes_sizes = []
+        for tensor in tensors:
+            axes_sizes.append(tensor.shape[axis])
+        out = Tensor(result, tuple(tensors), 'concatenate')
+        def _concatenate_backwards():
+            start_idx = 0
+            result_slice = [slice(None)] * out.data.ndim
+            for i in range(len(tensors)):
+                result_slice[axis] = slice(start_idx, start_idx + axes_sizes[i])
+                tensors[i].grad += out.grad[tuple(result_slice)]
+                start_idx += axes_sizes[i]
+        out._backward = _concatenate_backwards
+        return out
+
+    @classmethod
     def broadcast_tensors_if_necessary(cls, t1: "Tensor", t2: "Tensor") -> Tuple["Tensor", "Tensor"]:
         if t1.shape == t2.shape:
             return t1, t2
         t1result, t2result = np.broadcast_arrays(t1.data, t2.data)
-        out1 = Tensor(t1result.copy(), (t1,), 'broadcast')
-        out2 = Tensor(t2result.copy(), (t2,), 'broadcast')
+        out1 = Tensor(t1result, (t1,), 'broadcast')
+        out2 = Tensor(t2result, (t2,), 'broadcast')
         def _broadcast_backward_generic(in_tensor, out_tensor):
             def _broadcast_backward():
-                print('t1', t1.shape, 't2', t2.shape, 'out', out_tensor.shape, 'in', in_tensor.shape, 'reduced', _reduce_grad(out_tensor.grad, in_tensor.shape).shape)
                 in_tensor.grad += _reduce_grad(out_tensor.grad, in_tensor.shape)
             return _broadcast_backward
         out1._backward = _broadcast_backward_generic(t1, out1)
         out2._backward = _broadcast_backward_generic(t2, out2)
         return out1, out2
+
+    def broadcast_to(self, shape):
+        if self.shape == shape:
+            return self
+        result = np.broadcast_to(self.data, shape)
+        out = Tensor(result, (self,), 'broadcast_to')
+        def _broadcast_to_backward():
+            self.grad += _reduce_grad(out.grad, self.shape)
+        out._backward = _broadcast_to_backward
+        return out
 
     def __add__(self, other):
         if is_num(other):
@@ -257,29 +298,130 @@ class Tensor:
         batch_dims_1 = self.data.shape[:-2]
         batch_dims_2 = other.data.shape[:-2]
 
-        if batch_dims_1 != batch_dims_2:
-            raise ValueError("Cannot do matmul if batch dims don't match")
+        if batch_dims_1 == batch_dims_2:
+            # no broadcast
+            t1 = self
+            t2 = other
+        else:
+            print(self.shape, other.shape)
+            # let's broadcast
+            if not can_broadcast(batch_dims_1, batch_dims_2):
+                raise ValueError("Cannot broadcast matrix multiplication")
+            t1s = list(batch_dims_1)
+            t2s = list(batch_dims_2)
+            if len(t1s) < len(t2s):
+                t1s = [1] * (len(t2s)-len(t1s)) + t1s
+            if len(t2s) < len(t1s):
+                t2s = [1] * (len(t1s)-len(t2s)) + t2s
+            result_shape = tuple(np.array([t1s, t2s]).max(axis=0))
+            t1 = self.broadcast_to(result_shape + self.data.shape[-2:])
+            t2 = other.broadcast_to(result_shape + other.shape[-2:])
 
         # G is dim nxl
         # A^T @ G -> mxn @ nxl -> mxl -> B
         # G @ B^T -> nxl @ lxk -> nxk -> A
 
-        out = Tensor(self.data @ other.data, (self, other), '@')
+        out = Tensor(t1.data @ t2.data, (t1, t2), '@')
         def _matmul_backward():
-            self.grad += out.grad @ other.data.swapaxes(-1, -2)
-            other.grad += self.data.swapaxes(-1, -2) @ out.grad
+            t1.grad += out.grad @ t2.data.swapaxes(-1, -2)
+            t2.grad += t1.data.swapaxes(-1, -2) @ out.grad
         out._backward = _matmul_backward
         return out
     
     def __neg__(self):
         return self * -1
     
-    def sum(self):
-        summed_result = np.sum(self.data)
+    def sum(self, axis=None, keepdims=False):
+        summed_result = np.sum(self.data, axis=axis, keepdims=keepdims)
         out = Tensor(summed_result, (self,), 'sum')
         def _sum_backward():
-            self.grad += out.grad
+            # if axis is None, we're summing everything to a scalar
+            if axis is None:
+                # out.grad is a scalar, so we just broadcast
+                self.grad += out.grad
+            else:
+                # need to broadcast the gradient back to original shape
+                if not keepdims:
+                    # expand dims back out for proper broadcasting
+                    grad = np.expand_dims(out.grad, axis=axis)
+                else:
+                    grad = out.grad
+                # explicitly broadcast here
+                self.grad += np.broadcast_to(grad, self.data.shape)
         out._backward = _sum_backward
+        return out
+
+    def max(self, axis: int, keepdims=True):
+        # Get max values along the axis
+        max_vals = np.max(self.data, axis=axis, keepdims=keepdims)
+        
+        if keepdims:
+            out = Tensor(max_vals, (self,), 'max_kd')
+            
+            def _max_keepdims_backward():
+                # Create a mask for where the max values are
+                max_vals_expanded = np.max(self.data, axis=axis, keepdims=True)
+                max_mask = (self.data == max_vals_expanded)
+                
+                # Count how many times each position is max
+                num_maxes = np.sum(max_mask, axis=axis, keepdims=True)
+                
+                # Distribute gradient equally among all max positions
+                grad_mask = max_mask.astype(np.float64) / num_maxes
+                
+                # Broadcast the output gradient and apply the mask
+                self.grad += grad_mask * out.grad
+            
+            out._backward = _max_keepdims_backward
+        else:
+            out = Tensor(max_vals, (self,), 'max_nkd')
+            
+            def _max_nokeepdims_backward():
+                # Need to expand dims back for gradient computation
+                out_grad_expanded = np.expand_dims(out.grad, axis=axis)
+                max_vals_expanded = np.expand_dims(max_vals, axis=axis)
+                
+                max_mask = (self.data == max_vals_expanded)
+                num_maxes = np.sum(max_mask, axis=axis, keepdims=True)
+                grad_mask = max_mask.astype(np.float64) / num_maxes
+                
+                self.grad += grad_mask * out_grad_expanded
+            
+            out._backward = _max_nokeepdims_backward
+        
+        return out
+
+    def transpose(self, new_dims):
+        if len(new_dims) != len(self.shape):
+            raise ValueError(f"new dims should match length of self shape when transposing, have {new_dims}, and {self.shape}")
+        out = Tensor(np.transpose(self.data, new_dims), (self,), 'transpose')
+        def _transpose_backward():
+            reverse_indices = [0] * len(new_dims)
+            for i, d in enumerate(new_dims):
+                reverse_indices[d] = i
+            self.grad += out.grad.transpose(reverse_indices)
+        out._backward = _transpose_backward
+        return out
+
+    def __getitem__(self, indices):
+        result = self.data[indices]
+        out = Tensor(result, (self,), 'index')
+        def _index_backward():
+            grad_temp = np.zeros_like(self.data)
+            grad_temp[indices] = out.grad
+            self.grad += grad_temp
+        out._backward = _index_backward
+        return out
+
+    def masked_fill(self, mask, replace_value):
+        if not is_num(replace_value):
+            raise ValueError("Trying to do masked fill with non number")
+        result = np.where(mask, replace_value, self.data)
+        out = Tensor(result, (self,), 'masked_fill')
+        def _masked_fill_backward():
+            # don't flow gradient through where mask is
+            self.grad += np.where(mask, 0, out.grad)
+        out._backward = _masked_fill_backward
         return out
     
     def backward(self):
