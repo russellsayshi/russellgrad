@@ -268,6 +268,10 @@ class Tensor:
         out._backward = _tanh_backward
         return out
 
+    def leaky_relu(self, alpha=0.2):
+        mask = self.data < 0
+        return self.masked_multiply(mask, alpha)
+
     def exp(self):
         x = self.data
         out = Tensor(np.exp(x), (self,), 'exp')
@@ -303,7 +307,6 @@ class Tensor:
             t1 = self
             t2 = other
         else:
-            print(self.shape, other.shape)
             # let's broadcast
             if not can_broadcast(batch_dims_1, batch_dims_2):
                 raise ValueError("Cannot broadcast matrix multiplication")
@@ -332,6 +335,8 @@ class Tensor:
         return self * -1
     
     def sum(self, axis=None, keepdims=False):
+        if axis is not None and not isinstance(axis, int):
+            raise ValueError("axis must be None or an int")
         summed_result = np.sum(self.data, axis=axis, keepdims=keepdims)
         out = Tensor(summed_result, (self,), 'sum')
         def _sum_backward():
@@ -349,6 +354,38 @@ class Tensor:
                 # explicitly broadcast here
                 self.grad += np.broadcast_to(grad, self.data.shape)
         out._backward = _sum_backward
+        return out
+
+    def mean(self, axis=None, keepdims=False):
+        if axis is not None and not isinstance(axis, int):
+            raise ValueError("axis must be None or an int")
+        avgd_result = np.mean(self.data, axis=axis, keepdims=keepdims)
+        out = Tensor(avgd_result, (self,), 'mean')
+        def _mean_backward():
+            # if axis is None, we're avging everything to a scalar
+            if axis is None:
+                # out.grad is a scalar, so we just broadcast divided by the scale factor
+                self.grad += out.grad / self.data.size
+            else:
+                # need to broadcast the gradient back to original shape
+                if not keepdims:
+                    # expand dims back out for proper broadcasting
+                    grad = np.expand_dims(out.grad, axis=axis)
+                else:
+                    grad = out.grad
+                # compute scale factor
+                scale_factor = self.shape[axis]
+                # explicitly broadcast here
+                self.grad += np.broadcast_to(grad, self.data.shape) / scale_factor
+        out._backward = _mean_backward
+        return out
+
+    def sqrt(self):
+        result = np.sqrt(self.data)
+        out = Tensor(result, (self,), 'sqrt')
+        def _sqrt_backwards():
+            self.grad += 0.5 / out.data * out.grad
+        out._backward = _sqrt_backwards
         return out
 
     def max(self, axis: int, keepdims=True):
@@ -422,6 +459,17 @@ class Tensor:
             # don't flow gradient through where mask is
             self.grad += np.where(mask, 0, out.grad)
         out._backward = _masked_fill_backward
+        return out
+
+    def masked_multiply(self, mask, multiply_value):
+        if not is_num(multiply_value):
+            raise ValueError("Trying to do masked multiply with non number")
+        result = np.where(mask, multiply_value * self.data, self.data)
+        out = Tensor(result, (self,), 'masked_multiply')
+        def _masked_multiply_backward():
+            # change gradient multiple through where mask is
+            self.grad += np.where(mask, out.grad * multiply_value, out.grad)
+        out._backward = _masked_multiply_backward
         return out
     
     def backward(self):
