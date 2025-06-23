@@ -258,7 +258,7 @@ if __name__ == "__main__":
             
         def forward(self, x):
             x = self.up_proj(x)
-            x = F.leaky_relu(x, negative_slope=0.2)
+            x = F.leaky_relu(x, negative_slope=0.01)
             x = self.down_proj(x)
             return x
     

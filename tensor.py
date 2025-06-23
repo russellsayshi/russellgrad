@@ -268,7 +268,7 @@ class Tensor:
         out._backward = _tanh_backward
         return out
 
-    def leaky_relu(self, alpha=0.2):
+    def leaky_relu(self, alpha=0.01):
         mask = self.data < 0
         return self.masked_multiply(mask, alpha)
 
