@@ -75,7 +75,7 @@ class SGDOptimizer:
             total_norm += param_norm ** 2
         total_norm = np.sqrt(total_norm)
 
-        clip_value = 40.0
+        clip_value = 5.0
         clip_coef = clip_value / max(clip_value, total_norm)
 
         # Gradient descent with clipping
