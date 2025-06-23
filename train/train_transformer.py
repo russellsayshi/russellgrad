@@ -27,21 +27,34 @@ def make_target(input_tokens: List[int]) -> List[int]:
 
 def train():
     # -- constants --
-    n_layers = 6
+    n_layers = 8
     n_attn_heads = 8
     ff_scale_factor = 4
-    max_seq_len = 512
-    word_embedding_dim = 128
-
+    max_seq_len = 64
+    word_embedding_dim = 256
+    
+    # Training hyperparameters
+    num_epochs = 20  # Define how many epochs you want
+    
     tokenizer = Tokenizer(n_words, max_seq_len, word_embedding_dim, pad_token_id)
     transformer = Transformer(tokenizer, n_layers, n_attn_heads, ff_scale_factor)
     
-    optimizer = SGDOptimizer(transformer.parameters(), lr=5e-3, lr_schedule='exponential_falloff', exponential_falloff_constant=0.999)
-
     batches = load_dataset()
+    total_steps = num_epochs * len(batches)
+    warmup_steps = 5
+    
+    # Use cosine schedule with warmup
+    optimizer = SGDOptimizer(
+        transformer.parameters(), 
+        lr=1e-3,
+        lr_schedule='cosine_with_warmup',
+        min_lr=1e-5,
+        total_steps=total_steps,
+        warmup_steps=warmup_steps
+    )
 
     epoch = 0
-    while True:
+    while epoch < num_epochs:
         for i, batch in enumerate(batches):
             if optimizer.global_step % 20 == 0:
                 # every 20 steps, let's give a sample output
