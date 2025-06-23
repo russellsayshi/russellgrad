@@ -1,5 +1,5 @@
-from russelltransformer import *
 from tensor import Tensor
+from russelltransformer import *
 import numpy as np
 from tokenizer_constants import pad_token_id, n_words
 

@@ -87,7 +87,6 @@ class AdamOptimizer:
 
         updates: List[Tuple[Tensor, np.ndarray]] = [] # tuple of (param, update)
         for param in self.params:
-            g = param.grad
             pid = id(param)
             if pid not in self.momentum_estimates or pid not in self.variance_estimates:
                 raise ValueError("adam got a parameter we haven't seen before")
@@ -155,7 +154,9 @@ if __name__ == "__main__":
         opt_torch.step()
         opt_torch.zero_grad()
         
-        w_np.grad = 2 * w_np.data            # same analytic grad
+        # w_np.grad = 2 * w_np.data            # same analytic grad
+        loss_np = (w_np ** 2).sum()
+        loss_np.backward()
         opt_np.step()
         opt_np.zero_grad()
 

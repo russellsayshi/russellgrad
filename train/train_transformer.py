@@ -3,7 +3,7 @@ from typing import List
 from generate import generate
 from russelltransformer import Tokenizer, Transformer
 from tokenizer_constants import n_words, pad_token_id
-from optimizer import SGDOptimizer
+from optimizers.adam import AdamOptimizer
 from loss import cross_entropy_loss
 import numpy as np
 np.random.seed(42)
@@ -31,7 +31,7 @@ def train():
     n_attn_heads = 8
     ff_scale_factor = 4
     max_seq_len = 64
-    word_embedding_dim = 512
+    word_embedding_dim = 384
     
     # Training hyperparameters
     num_epochs = 20  # Define how many epochs you want
@@ -44,7 +44,7 @@ def train():
     warmup_steps = 5
     
     # Use cosine schedule with warmup
-    optimizer = SGDOptimizer(
+    optimizer = AdamOptimizer(
         transformer.parameters(), 
         lr=1e-3,
         lr_schedule='cosine_with_warmup',
