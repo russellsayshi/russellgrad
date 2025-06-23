@@ -504,6 +504,31 @@ class Tensor:
     def shape(self):
         return self.data.shape
 
+    def detach(self):
+        """Clears references to allow for garbage collection and removing gradient computation"""
+        self._prev = set()
+        self._backward = lambda: None
+
+    def zero_grad_graph(self):
+        """Recursively zero gradients and detach the computational graph"""
+        # Build the full graph first
+        visited = set()
+        nodes = []
+        
+        def build_graph(v):
+            if v not in visited:
+                visited.add(v)
+                nodes.append(v)
+                for child in v._prev:
+                    build_graph(child)
+        
+        build_graph(self)
+        
+        # Now detach all nodes
+        for node in nodes:
+            node.grad = np.zeros_like(node.grad)
+            node.detach()
+
 class Linear:
     def __init__(self, in_dim, out_dim):
         self.weights = Tensor(np.random.normal(0, 0.02, (out_dim, in_dim)))
