@@ -13,9 +13,9 @@ class AttentionHead:
     def __init__(self, d_kq: int, d_v: int, hidden_size: int):
         self.d_kq = d_kq
         self.d_v = d_v
-        self.W_Q = Tensor(np.random.normal(0, 0.02, (hidden_size, d_kq)))
-        self.W_K = Tensor(np.random.normal(0, 0.02, (hidden_size, d_kq)))
-        self.W_V = Tensor(np.random.normal(0, 0.02, (hidden_size, d_v)))
+        self.W_Q = Tensor(np.random.normal(0, 0.01, (hidden_size, d_kq)))
+        self.W_K = Tensor(np.random.normal(0, 0.01, (hidden_size, d_kq)))
+        self.W_V = Tensor(np.random.normal(0, 0.01, (hidden_size, d_v)))
 
     def parameters(self):
         return [
@@ -85,9 +85,9 @@ class FFLayer:
     def __init__(self, proj_dim: int, hidden_size: int) -> None:
         if proj_dim < hidden_size:
             raise ValueError("up project dim must be greater than hidden_size")
-        self.up_proj_weights = Tensor(np.random.normal(0, 0.02, (hidden_size, proj_dim)))
+        self.up_proj_weights = Tensor(np.random.normal(0, 0.01, (hidden_size, proj_dim)))
         self.up_proj_bias = Tensor(np.zeros((proj_dim)))
-        self.down_proj_weights = Tensor(np.random.normal(0, 0.02, (proj_dim, hidden_size)))
+        self.down_proj_weights = Tensor(np.random.normal(0, 0.01, (proj_dim, hidden_size)))
         self.down_proj_bias = Tensor(np.zeros((hidden_size)))
 
     def parameters(self):

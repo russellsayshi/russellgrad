@@ -31,7 +31,7 @@ def train():
     n_attn_heads = 8
     ff_scale_factor = 4
     max_seq_len = 64
-    word_embedding_dim = 256
+    word_embedding_dim = 512
     
     # Training hyperparameters
     num_epochs = 20  # Define how many epochs you want
